@@ -1,0 +1,15 @@
+[package]
+name    = "pi_benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rug = { version = "1.24", features = ["float"] }   # bindings a GMP/MPFR
+libc = "0.2"
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+panic         = "abort"
+strip         = true
