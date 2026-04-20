@@ -3,7 +3,8 @@
 //  Algoritmo: Chudnovsky — ~14 dígitos decimales por iteración
 // ─────────────────────────────────────────────────────────────
 
-use rug::{Float, Integer, ops::Pow};
+use rug::{Float, Integer};
+use rug::ops::Pow;
 use std::fs;
 use std::time::{Duration, Instant};
 
@@ -12,55 +13,72 @@ use std::time::{Duration, Instant};
 // ─────────────────────────────────────────────
 
 fn digits_to_bits(digits: u32) -> u32 {
-    // 1 dígito decimal ≈ 3.32193 bits
     ((digits as f64) * 3.321928 + 64.0) as u32
 }
 
-fn pi_chudnovsky(digits: u32) -> Float {
-    let prec = digits_to_bits(digits + 10);
+// ── Binary splitting para Chudnovsky ─────────────────────────
+// Retorna (P, Q, T) tal que pi = 426880*sqrt(10005)*Q / T
+// Misma estrategia que mpmath internamente — evita que X crezca
+// sin control y reduce la cantidad de operaciones Float.
+struct PQT {
+    p: Integer,
+    q: Integer,
+    t: Integer,
+}
 
-    // Constante C = 426880 * sqrt(10005)
-    let c = {
-        let mut v = Float::with_val(prec, 10005u32);
-        v.sqrt_mut();
-        v *= 426880u32;
-        v
-    };
-
-    let mut big_m   = Integer::from(1u32);
-    let mut big_x   = Integer::from(1i32);
-    let mut big_l   = Integer::from(13591409u32);
-    let mut big_k   = Integer::from(6i32);
-    let mut s       = Float::with_val(prec, 13591409u32);
-
-    let iters = digits / 14 + 2;
-
-    for i in 1u32..=iters {
-        // M = M * (K^3 - 16*K) / i^3
-        let k3 = big_k.clone().pow(3u32);
-        let k16 = big_k.clone() * 16;
-        let num = k3 - k16;
-        big_m *= num;
-        big_m /= Integer::from(i).pow(3u32);
-
-        // X *= -262537412640768000
-        big_x *= Integer::from(-262537412640768000i64);
-
-        // L += 545140134
-        big_l += 545140134u32;
-
-        // K += 12
-        big_k += 12;
-
-        // S += M * L / X
-        let term = {
-            let ml = Float::with_val(prec, &big_m) * Float::with_val(prec, &big_l);
-            ml / Float::with_val(prec, &big_x)
+fn chudnovsky_bs(a: u64, b: u64) -> PQT {
+    if b - a == 1 {
+        // Caso base
+        let (p, q, t);
+        if a == 0 {
+            p = Integer::from(1u32);
+            q = Integer::from(1u32);
+        } else {
+            // P(a) = (6a-5)(2a-1)(6a-1)
+            let a6 = 6 * a;
+            let a2 = 2 * a;
+            p = Integer::from((a6 - 5) * (a2 - 1) * (a6 - 1));
+            // Q(a) = 10939058860032000 * a^3
+            let a3 = Integer::from(a).pow(3u32);
+            q = a3 * Integer::from(10939058860032000u64);
+        }
+        // T(a) = P(a) * (13591409 + 545140134*a)
+        let l = Integer::from(13591409u64) + Integer::from(545140134u64) * Integer::from(a);
+        t = if a % 2 == 0 {
+            p.clone() * l
+        } else {
+            -(p.clone() * l)
         };
-        s += term;
+        return PQT { p, q, t };
     }
 
-    c / s
+    let mid = (a + b) / 2;
+    let left  = chudnovsky_bs(a, mid);
+    let right = chudnovsky_bs(mid, b);
+
+    // P = Pl * Pr
+    // Q = Ql * Qr
+    // T = Tl * Qr + Pl * Tr
+    let p = left.p.clone() * &right.p;
+    let t = left.t.clone()  * &right.q + left.p * right.t;
+    let q = left.q * right.q;
+
+    PQT { p, q, t }
+}
+
+fn pi_chudnovsky(digits: u32) -> Float {
+    let prec  = digits_to_bits(digits + 10);
+    let iters = (digits as u64) / 14 + 2;
+
+    let pqt = chudnovsky_bs(0, iters);
+
+    // pi = 426880 * sqrt(10005) * Q / T
+    let mut result = Float::with_val(prec, &pqt.q);
+    let sqrt10005 = Float::with_val(prec, 10005u32).sqrt();
+    result *= 426880u32;
+    result *= sqrt10005;
+    result /= Float::with_val(prec, &pqt.t);
+    result
 }
 
 fn max_pi_in_time(seconds: f64) -> (u32, f64, Option<f64>) {
