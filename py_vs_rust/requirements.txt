@@ -1,0 +1,4 @@
+gmpy2==2.3.0
+mpmath==1.4.1
+matplotlib
+numpy
